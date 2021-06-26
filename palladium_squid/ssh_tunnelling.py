@@ -8,20 +8,27 @@ from palladium_squid.util import dprint
 
 
 class SSHTransportDefinition:
-    def __init__(self, hostname: str, port: int, username: str, password = None, private_key = None, host_key = None):
+    def __init__(self, hostname: str, port: int, username: str, password = None, private_key = None, host_key = None,
+                 score=100, private_key_path=None, auth_type_str=None):
         self.username = username
         self.password = password
         self.private_key = private_key
         self.host_key = host_key
         self.hostname = hostname
         self.port = port
+        self.score = score
+        self.private_key_path = private_key_path
+        self.auth_type_str = auth_type_str
 
     # noinspection PyTypeChecker
     def pickup(self) -> paramiko.Transport:
         transport = paramiko.Transport((self.hostname, self.port))
         transport.connect(hostkey=self.host_key, username=self.username, password=self.password, pkey=self.private_key)
-        print(transport.is_authenticated())
         return transport
+
+    def dump(self) -> str:
+        return f"{self.score} ssh://{self.username}@{self.hostname}" + f":{self.port}"*(self.port != 22) + \
+               f" {self.auth_type_str} " + (self.password or self.private_key_path)
 
 
 class SSHTransportCarousel(Thread):
@@ -44,7 +51,7 @@ class SSHTransportCarousel(Thread):
         )
 
         if chan is None:
-            print("Rejected")
+            definition.score = 0
         return chan
 
 
@@ -65,16 +72,24 @@ def carousel_from_file(filehandle) -> SSHTransportCarousel:
 
         auth_type, auth = remainder.split(" ", 1)
         username = username.lstrip()
-        hostname, port = get_host_port(full_host.strip())
+        hostname, port = get_host_port(full_host.strip().replace("ssh://", ""))
 
         password = None
         private_key = None
+        private_key_path = None
+        auth_type_str = None
 
-        if auth_type.lower() in ["pass", "password", "p"]:
+        if auth_type.lower() in ["pass", "password", "p", "pas"]:
             password = auth
+            auth_type_str = "pass"
         if auth_type.lower() in ["rsa"]:
             private_key = paramiko.RSAKey.from_private_key_file(auth)
+            private_key_path = auth
+            auth_type_str = "rsa"
 
-        carousel.transport_definitions.append(SSHTransportDefinition(hostname, port, username, password, private_key))
+        carousel.transport_definitions.append(
+            SSHTransportDefinition(hostname, port, username, password, private_key,
+                                   score=100, private_key_path=private_key_path,
+                                   auth_type_str=auth_type_str))
 
     return carousel

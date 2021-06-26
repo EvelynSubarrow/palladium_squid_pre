@@ -4,6 +4,7 @@ import socket, select
 from datetime import datetime
 import ipaddress
 import struct
+import argparse
 
 # Tredjepart!
 from termcolor import colored
@@ -15,7 +16,8 @@ from palladium_squid.socks5_util import (breakdown_socks_auth, form_response, SO
 from palladium_squid.util import dprint
 from palladium_squid.ssh_tunnelling import carousel_from_file
 
-SAFE_ASCII = range(32,128)
+SAFE_ASCII = range(32, 128)
+
 
 class Client:
     def __init__(self, sock, control=False):
@@ -60,7 +62,7 @@ class Client:
             if self in a: a.remove(self)
 
 
-def process(c: Client):
+def process(c: Client, carousel):
     if c.phase == 0:
         if len(c.read_buffer) >= 2:
             protocol_version = int(c.read_buffer[0])  # uint8, must be 0x05 for socks5
@@ -121,14 +123,18 @@ def process(c: Client):
                 else:
                     # Let's assume we're O.K!
                     ssh_socket = carousel.setup(address.decode("ascii"), port)
-                    #ssh_socket = socket.create_connection((address.decode("ascii"), port))
-                    ssh_client = Client(ssh_socket)
-                    ssh_client.phase = 3
-                    ssh_client.pair = c
-                    c.pair = ssh_client
-                    c.phase = 2
-                    read.append(ssh_client)
-                    c.append_write(form_response(SOCKS_STATUS_SUCCESS, b"\x01\x00\x00\x00\x00" + struct.pack("!H", c.port)))
+                    if not ssh_socket:
+                        c.append_write(form_response(SOCKS_STATUS_CONNECTION_NOT_ALLOWED,
+                                                     b"\x01\x00\x00\x00\x00" + struct.pack("!H", c.port)))
+                    else:
+                        ssh_client = Client(ssh_socket)
+                        ssh_client.phase = 3
+                        ssh_client.pair = c
+                        c.pair = ssh_client
+                        c.phase = 2
+                        read.append(ssh_client)
+                        c.append_write(form_response(SOCKS_STATUS_SUCCESS,
+                                                     b"\x01\x00\x00\x00\x00" + struct.pack("!H", c.port)))
     elif c.phase in [2, 3]:
         c.pair.append_write(c.read_buffer)
         c.read_buffer = b''
@@ -151,13 +157,12 @@ def server_socket(host, port, ip6=True):
     return s
 
 
+# TODO: not this
+read, write = [], []
 
-
-if __name__ == "__main__":
-    with open("_sample_targets.txt") as f:
-        carousel = carousel_from_file(f)
-
-    server = server_socket("::", 12345)
+def mainloop(socks_host, socks_port, carousel):
+    global read, write
+    server = server_socket(socks_host, socks_port)
     read = [server]
     write = []
 
@@ -180,7 +185,7 @@ if __name__ == "__main__":
                             connection_list.remove(c)
                 else:
                     c.read_buffer += new_data
-                    process(c)
+                    process(c, carousel)
 
         for c in write:
             if c.write_buffer:
@@ -193,3 +198,39 @@ if __name__ == "__main__":
                 continue
             if ut_now - c.ut_accepted >= 10 and c.phase not in [2, 3]:
                 c.disconnect("Failed to complete SOCKS handshake in time")
+
+
+def testloop(carousel):
+    pass
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--socks-bind", type=str, default="::", help="socks5 bind host")
+    parser.add_argument("--socks-host", type=int, default=8090, help="socks5 bind port")
+
+    action1 = parser.add_mutually_exclusive_group(required=True)
+    action1.add_argument('--text-file', type=str, help='Use a text file of credentials formatted')
+
+    action2 = parser.add_mutually_exclusive_group(required=True)
+    action2.add_argument("-p", "--proxy", action='store_true', help="Presents a SOCKS proxy at the defined port")
+    action2.add_argument("-t", "--test", action='store_true', help="Checks credentials, dumps to file")
+
+    parser.add_argument("-o", "--output-file", help="File to dump text rows to")
+
+    args = parser.parse_args()
+
+    if args.text_file:
+        with open(args.text_file) as f:
+            file_carousel = carousel_from_file(f)
+
+    if args.proxy:
+        mainloop(args.socks_bind, args.socks_host, file_carousel)
+    if args.test:
+        testloop(file_carousel)
+
+    if args.output_file:
+        with open(args.output_file, "w") as f:
+            for definition in file_carousel.transport_definitions:
+                print(definition.dump(), file=f)
+
