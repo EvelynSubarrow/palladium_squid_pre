@@ -201,7 +201,8 @@ def mainloop(socks_host, socks_port, carousel):
 
 
 def testloop(carousel):
-    pass
+    for transport_def in carousel.get_transports():
+        transport_def.test("example.com", 80)
 
 
 if __name__ == "__main__":
@@ -231,6 +232,6 @@ if __name__ == "__main__":
 
     if args.output_file:
         with open(args.output_file, "w") as f:
-            for definition in file_carousel.transport_definitions:
+            for definition in file_carousel.get_transports():
                 print(definition.dump(), file=f)
 
