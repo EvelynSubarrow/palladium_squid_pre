@@ -151,13 +151,14 @@ def server_socket(host, port, ip6=True):
     return s
 
 
+
+
 if __name__ == "__main__":
     with open("_sample_targets.txt") as f:
         carousel = carousel_from_file(f)
 
     server = server_socket("::", 12345)
-    control = server_socket("127.0.0.1", 8454, False)
-    read = [server, control]
+    read = [server]
     write = []
 
 
@@ -166,9 +167,8 @@ if __name__ == "__main__":
         ut_now = int(datetime.now().timestamp())
 
         for c in r:
-            if c in [server, control]:
-                is_control = c == control
-                client = Client(server.accept(), is_control)
+            if c in [server]:
+                client = Client(server.accept(), False)
                 dprint(client, "--", 1, "Connected (%s)" % client.port)
                 read.append(client)
             else:
@@ -189,7 +189,7 @@ if __name__ == "__main__":
                     write.remove(c)
 
         for c in read + write:
-            if c in [server, control] or c.is_control:
+            if c in [server] or c.is_control:
                 continue
             if ut_now - c.ut_accepted >= 10 and c.phase not in [2, 3]:
                 c.disconnect("Failed to complete SOCKS handshake in time")
