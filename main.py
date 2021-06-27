@@ -219,12 +219,15 @@ if __name__ == "__main__":
         with open(args.text_file) as f:
             file_carousel = carousel_from_file(f)
 
-    if args.proxy:
-        mainloop(args.socks_bind, args.socks_host, file_carousel)
-    if args.test:
-        testloop(file_carousel)
     if not args.no_tor:
         file_carousel.set_outbound_socks("localhost", 9050)
+
+    if args.proxy:
+        mainloop(args.socks_bind, args.socks_host, file_carousel)
+
+    if args.test:
+        testloop(file_carousel)
+
 
     if args.output_file:
         with open(args.output_file, "w") as f:
