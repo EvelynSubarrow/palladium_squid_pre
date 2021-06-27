@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+import logging
 import socket, select
 from datetime import datetime
 import ipaddress
@@ -15,7 +15,7 @@ from termcolor import colored
 from palladium_squid.socks5_util import (breakdown_socks_auth, form_response, SOCKS_ADDRESS_TYPES, SOCKS_COMMANDS,
                                          SOCKS_STATUS_COMMAND_UNSUPPORTED, SOCKS_STATUS_CONNECTION_NOT_ALLOWED,
                                          SOCKS_STATUS_SUCCESS)
-from palladium_squid.util import dprint
+from palladium_squid.util import dprint, setup_logging
 from palladium_squid.ssh_tunnelling import carousel_from_file, create_all, SSHTransportCarousel
 
 SAFE_ASCII = range(32, 128)
@@ -169,12 +169,12 @@ def mainloop(socks_host, socks_port, carousel):
         for c in r:
             if c in [server]:
                 client = Client(server.accept(), False)
-                dprint(client, "--", 1, "Connected (%s)" % client.port)
+                dprint(client, "--", 1, "Connected")
                 read.append(client)
             else:
                 new_data = c.recv(1024)
                 if not len(new_data):
-                    dprint(c, "--", 1, f"Disconnected by client ({c.port})")
+                    dprint(c, "--", 1, f"Disconnected by client")
                     for connection_list in [read, write]:
                         if c in connection_list:
                             connection_list.remove(c)
@@ -200,6 +200,8 @@ def testloop(carousel):
 
 
 if __name__ == "__main__":
+    setup_logging()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-tor", "-N", action='store_true', default=False)
 
