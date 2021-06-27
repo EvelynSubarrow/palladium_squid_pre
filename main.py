@@ -208,8 +208,8 @@ if __name__ == "__main__":
     parser.add_argument("--socks-bind", type=str, default="::", help="socks5 bind host")
     parser.add_argument("--socks-host", type=int, default=8090, help="socks5 bind port")
 
-    parser.add_argument('--text-file', type=str, help='Files to populate the database with', default=None)
-    parser.add_argument('--database-uri', type=str, help='A fully formed sqlalchemy DB URL. For sqlite files, use '
+    parser.add_argument('--text-file', '-i', type=str, help='Files to populate the database with', default=None)
+    parser.add_argument('--database-uri', '-d', type=str, help='A fully formed sqlalchemy DB URL. For sqlite files, use '
                                                          'sqlite:///database/path/here.sqlite (relative), '
                                                          'sqlite:////database/path/here.sqlite (absolute), '
                                                          'default is to use sqlite memory (sqlite://)',
