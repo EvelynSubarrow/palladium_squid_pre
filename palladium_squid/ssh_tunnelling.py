@@ -1,6 +1,6 @@
 from io import StringIO
 from threading import Thread, Lock
-from typing import List
+from typing import List, Optional
 import time
 from socket import socket
 import traceback
@@ -8,7 +8,6 @@ from datetime import datetime
 
 import paramiko
 import socks
-import sqlalchemy
 from sqlalchemy.orm import sessionmaker, relationship, Session
 from sqlalchemy import Column, ForeignKey, ForeignKeyConstraint, UniqueConstraint, CHAR, VARCHAR, JSON, SMALLINT, \
     INTEGER, DATE, BOOLEAN, TIMESTAMP, TIME, ARRAY, BLOB, and_
@@ -45,6 +44,8 @@ class SSHTransportDefinition(Base):
     auth_type_str = Column(VARCHAR, nullable=False)
     time_added = Column(TIMESTAMP, nullable=False)
     score = Column(INTEGER, nullable=False, default=0)
+
+    last_connection = Column(TIMESTAMP, nullable=True)
 
     def get_private_key(self):
         if self.auth_type_str == "rsa":
@@ -83,14 +84,18 @@ class SSHTransportCarousel(Thread):
         while True:
             time.sleep(0.1)
 
-    def setup(self, host, port) -> socket:
-        definition = self.session.query(SSHTransportDefinition)[0]
+    def setup(self, host, port) -> Optional[socket]:
+        query = self.session.query(SSHTransportDefinition).\
+            filter(SSHTransportDefinition.score == 0).order_by(SSHTransportDefinition.last_connection)
 
-        return _establish(definition, host, port, self.get_outbound_proxy())
+        if query.count():
+            return _establish(query[0], host, port, self.get_outbound_proxy())
+        else:
+            # TODO: dire error message
+            return None
 
     def get_transports(self) -> List[SSHTransportDefinition]:
         return self.session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added)
-
 
     def set_outbound_socks(self, hostname, port):
         self._outbound_socks_hostname = hostname
@@ -111,6 +116,7 @@ class SSHTransportCarousel(Thread):
 def _establish(definition, host, port, proxy_pair) -> socket:
     chan = None
     try:
+        definition.last_connection = datetime.now()
         ssh_transport = definition.pickup(proxy_pair)
 
         chan = ssh_transport.open_channel(
