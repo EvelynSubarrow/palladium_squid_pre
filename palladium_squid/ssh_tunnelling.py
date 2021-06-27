@@ -1,29 +1,54 @@
+from io import StringIO
 from threading import Thread, Lock
 from typing import List
 import time
 from socket import socket
 import traceback
+from datetime import datetime
 
 import paramiko
+import socks
+import sqlalchemy
+from sqlalchemy.orm import sessionmaker, relationship, Session
+from sqlalchemy import Column, ForeignKey, ForeignKeyConstraint, UniqueConstraint, CHAR, VARCHAR, JSON, SMALLINT, \
+    INTEGER, DATE, BOOLEAN, TIMESTAMP, TIME, ARRAY, BLOB, and_
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import update
 
 from palladium_squid.util import dprint
 
-import socks
+Base = declarative_base()
 
 
-class SSHTransportDefinition:
-    def __init__(self, hostname: str, port: int, username: str, password = None, private_key = None, host_key = None,
-                 score=0, private_key_path=None, auth_type_str=None, order=None):
-        self._username = username
-        self._password = password
-        self._private_key = private_key
-        self._host_key = host_key
-        self._hostname = hostname
-        self._port = port
-        self._score = score
-        self._private_key_path = private_key_path
-        self._auth_type_str = auth_type_str
-        self._order = order
+def create_all(engine):
+    Base.metadata.create_all(engine)
+
+
+class KeyFileDefinition(Base):
+    __tablename__ = "palladium_squid_private_keys"
+    key_path = Column(VARCHAR, nullable=False, primary_key=True)
+    key_contents = Column(VARCHAR, nullable=False)
+
+
+class SSHTransportDefinition(Base):
+    __tablename__ = "palladium_squid_credentials"
+    __table_args__ = (
+        UniqueConstraint("username", "hostname", "port"),
+    )
+    username = Column(VARCHAR, nullable=False, primary_key=True)
+    password = Column(VARCHAR, nullable=True)
+    key_path = Column(VARCHAR, ForeignKey(KeyFileDefinition.key_path), nullable=True)
+    key_rel: KeyFileDefinition = relationship("KeyFileDefinition", uselist=False, lazy="joined", innerjoin=True)
+
+    hostname = Column(VARCHAR, nullable=False, primary_key=True)
+    port = Column(SMALLINT, nullable=False, primary_key=True)
+    auth_type_str = Column(VARCHAR, nullable=False)
+    time_added = Column(TIMESTAMP, nullable=False)
+    score = Column(INTEGER, nullable=False, default=0)
+
+    def get_private_key(self):
+        if self.auth_type_str == "rsa":
+            return paramiko.RSAKey.from_private_key(StringIO(self.key_rel.key_contents))
 
     # noinspection PyTypeChecker
     def pickup(self, proxy_pair) -> paramiko.Transport:
@@ -33,40 +58,39 @@ class SSHTransportDefinition:
         else:
             s = socket()
 
-        s.connect((self._hostname, self._port))
+        s.connect((self.hostname, self.port))
 
         transport = paramiko.Transport(s)
-        transport.connect(hostkey=self._host_key, username=self._username, password=self._password, pkey=self._private_key)
+        transport.connect(username=self.username, password=self.password, pkey=self.get_private_key())
         return transport
 
     def dump(self) -> str:
-        return f"{self._score:<3} {self._username}@{self._hostname:16}" + f":{self._port}"*(self._port != 22) + \
-               f" {self._auth_type_str:>5} " + (self._password or self._private_key_path)
+        return f"{self.score:<3} {self.username}@{self.hostname:16}" + f":{self.port}"*(self.port != 22) + \
+               f" {self.auth_type_str:>5} " + (self.password or self.key_path)
 
     def index(self):
         return self._order
 
 
-
 class SSHTransportCarousel(Thread):
-    def __init__(self):
+    def __init__(self, session: Session):
         super().__init__()
-        self.transport_definitions = []
         self._outbound_socks_hostname = None
         self._outbound_socks_port = None
+        self.session = session
 
     def run(self):
         while True:
             time.sleep(0.1)
 
     def setup(self, host, port) -> socket:
-        definition = self.transport_definitions.pop()
-        self.transport_definitions.insert(0, definition)
+        definition = self.session.query(SSHTransportDefinition)[0]
 
         return _establish(definition, host, port, self.get_outbound_proxy())
 
     def get_transports(self) -> List[SSHTransportDefinition]:
-        return sorted(self.transport_definitions, key=lambda x: x.index())
+        return self.session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added)
+
 
     def set_outbound_socks(self, hostname, port):
         self._outbound_socks_hostname = hostname
@@ -95,6 +119,7 @@ def _establish(definition, host, port, proxy_pair) -> socket:
             ('Unknown', 0),  # This is supposed to be the peer name
         )
     except Exception as e:
+        print(traceback.format_exc())
         chan = None
     if chan is None:
         definition._score = 1
@@ -107,8 +132,8 @@ def get_host_port(full_host: str, default_port: int = 22):
     return args[0], args[1]
 
 
-def carousel_from_file(filehandle) -> SSHTransportCarousel:
-    carousel = SSHTransportCarousel()
+def carousel_from_file(filehandle, session: Session) -> SSHTransportCarousel:
+    carousel = SSHTransportCarousel(session)
 
     for row_n, line in enumerate(filehandle):
         remainder = line.rstrip("\n")
@@ -140,10 +165,34 @@ def carousel_from_file(filehandle) -> SSHTransportCarousel:
             private_key = paramiko.RSAKey.from_private_key_file(auth)
             private_key_path = auth
             auth_type_str = "rsa"
+            with open(private_key_path, "r") as f:
+                query = session.query(KeyFileDefinition).filter(KeyFileDefinition.key_path == private_key_path)
+                if not query.count():
+                    session.add(KeyFileDefinition(key_path=private_key_path, key_contents=f.read()))
+                else:
+                    update_values = {
+                        KeyFileDefinition.key_contents: f.read()
+                    }
+                    session.execute(update(KeyFileDefinition, values=update_values).where(
+                        KeyFileDefinition.key_path == private_key_path))
 
-        carousel.transport_definitions.append(
-            SSHTransportDefinition(hostname, port, username, password, private_key,
-                                   score=score, private_key_path=private_key_path,
-                                   auth_type_str=auth_type_str, order=row_n))
-
+            query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.hostname == hostname,
+                                                                 SSHTransportDefinition.username == username,
+                                                                 SSHTransportDefinition.port == port))
+            if not query.count():
+                session.add(SSHTransportDefinition(hostname=hostname, port=port, username=username, password=password,
+                                       score=score, key_path=private_key_path,
+                                       auth_type_str=auth_type_str, time_added=datetime.utcnow()))
+            else:
+                update_values = {
+                    SSHTransportDefinition.password: password,
+                    SSHTransportDefinition.key_path: private_key_path,
+                    SSHTransportDefinition.auth_type_str: auth_type_str
+                }
+                session.execute(update(SSHTransportDefinition, values=update_values).where(
+                    and_(SSHTransportDefinition.hostname == hostname,
+                         SSHTransportDefinition.username == username,
+                         SSHTransportDefinition.port == port)
+                ))
+            session.commit()
     return carousel

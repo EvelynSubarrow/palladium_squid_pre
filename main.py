@@ -7,6 +7,8 @@ import struct
 import argparse
 
 # Tredjepart!
+import sqlalchemy
+from sqlalchemy.orm import scoped_session, sessionmaker
 from termcolor import colored
 
 # Internal
@@ -14,7 +16,7 @@ from palladium_squid.socks5_util import (breakdown_socks_auth, form_response, SO
                                          SOCKS_STATUS_COMMAND_UNSUPPORTED, SOCKS_STATUS_CONNECTION_NOT_ALLOWED,
                                          SOCKS_STATUS_SUCCESS)
 from palladium_squid.util import dprint
-from palladium_squid.ssh_tunnelling import carousel_from_file
+from palladium_squid.ssh_tunnelling import carousel_from_file, create_all, SSHTransportCarousel
 
 SAFE_ASCII = range(32, 128)
 
@@ -204,8 +206,12 @@ if __name__ == "__main__":
     parser.add_argument("--socks-bind", type=str, default="::", help="socks5 bind host")
     parser.add_argument("--socks-host", type=int, default=8090, help="socks5 bind port")
 
-    action1 = parser.add_mutually_exclusive_group(required=True)
-    action1.add_argument('--text-file', type=str, help='Use a text file of credentials formatted')
+    parser.add_argument('--text-file', type=str, help='Files to populate the database with', default=None)
+    parser.add_argument('--database-uri', type=str, help='A fully formed sqlalchemy DB URL. For sqlite files, use '
+                                                         'sqlite:///database/path/here.sqlite (relative), '
+                                                         'sqlite:////database/path/here.sqlite (absolute), '
+                                                         'default is to use sqlite memory (sqlite://)',
+                        default="sqlite://")
 
     action2 = parser.add_mutually_exclusive_group(required=True)
     action2.add_argument("-p", "--proxy", action='store_true', help="Presents a SOCKS proxy at the defined port")
@@ -215,22 +221,29 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.text_file:
-        with open(args.text_file) as f:
-            file_carousel = carousel_from_file(f)
+    engine = sqlalchemy.create_engine(args.database_uri)
+    session_factory = sessionmaker(bind=engine, autoflush=True)
+    Session = scoped_session(session_factory)
 
-    if not args.no_tor:
-        file_carousel.set_outbound_socks("localhost", 9050)
+    create_all(engine)
 
-    if args.proxy:
-        mainloop(args.socks_bind, args.socks_host, file_carousel)
+    with Session() as database_session:
+        if args.text_file:
+            with open(args.text_file) as f:
+                file_carousel = carousel_from_file(f, database_session)
+        else:
+            file_carousel = SSHTransportCarousel(database_session)
 
-    if args.test:
-        testloop(file_carousel)
+        if not args.no_tor:
+            file_carousel.set_outbound_socks("localhost", 9050)
 
+        if args.proxy:
+            mainloop(args.socks_bind, args.socks_host, file_carousel)
 
-    if args.output_file:
-        with open(args.output_file, "w") as f:
-            for definition in file_carousel.get_transports():
-                print(definition.dump(), file=f)
+        if args.test:
+            testloop(file_carousel)
 
+        if args.output_file:
+            with open(args.output_file, "w") as f:
+                for definition in file_carousel.get_transports():
+                    print(definition.dump(), file=f)
