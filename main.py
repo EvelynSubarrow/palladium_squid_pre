@@ -142,12 +142,6 @@ def process(c: Client, carousel):
         dprint(c, "<<", 1, repr(c.read_buffer))
 
 
-def process_control(c):
-    text = c.read_buffer.decode("utf8").rstrip()
-    dprint(c, "<-", 1, text)
-    c.read_buffer = b""
-
-
 def server_socket(host, port, ip6=True):
     s_flags = socket.AF_INET6 if ip6 else socket.AF_INET
     s = socket.socket(s_flags)
@@ -165,7 +159,6 @@ def mainloop(socks_host, socks_port, carousel):
     server = server_socket(socks_host, socks_port)
     read = [server]
     write = []
-
 
     while True:
         r, w, x = select.select(read, write, [], 2)
@@ -201,12 +194,13 @@ def mainloop(socks_host, socks_port, carousel):
 
 
 def testloop(carousel):
-    for transport_def in carousel.get_transports():
-        transport_def.test("example.com", 80)
+    carousel.test_all()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--no-tor", "-N", action='store_true', default=False)
+
     parser.add_argument("--socks-bind", type=str, default="::", help="socks5 bind host")
     parser.add_argument("--socks-host", type=int, default=8090, help="socks5 bind port")
 
@@ -229,6 +223,8 @@ if __name__ == "__main__":
         mainloop(args.socks_bind, args.socks_host, file_carousel)
     if args.test:
         testloop(file_carousel)
+    if not args.no_tor:
+        file_carousel.set_outbound_socks("localhost", 9050)
 
     if args.output_file:
         with open(args.output_file, "w") as f:

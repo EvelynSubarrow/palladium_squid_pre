@@ -2,10 +2,13 @@ from threading import Thread, Lock
 from typing import List
 import time
 from socket import socket
+import traceback
 
 import paramiko
 
 from palladium_squid.util import dprint
+
+import socks
 
 
 class SSHTransportDefinition:
@@ -23,8 +26,16 @@ class SSHTransportDefinition:
         self._order = order
 
     # noinspection PyTypeChecker
-    def pickup(self) -> paramiko.Transport:
-        transport = paramiko.Transport((self._hostname, self._port))
+    def pickup(self, proxy_pair) -> paramiko.Transport:
+        if proxy_pair:
+            s = socks.socksocket()
+            s.set_proxy(socks.PROXY_TYPE_SOCKS5, *proxy_pair)
+        else:
+            s = socket()
+
+        s.connect((self._hostname, self._port))
+
+        transport = paramiko.Transport(s)
         transport.connect(hostkey=self._host_key, username=self._username, password=self._password, pkey=self._private_key)
         return transport
 
@@ -35,17 +46,14 @@ class SSHTransportDefinition:
     def index(self):
         return self._order
 
-    def test(self, test_host, test_port):
-        sock = _establish(self, test_host, test_port)
-        if sock:
-            sock.close()
-
 
 
 class SSHTransportCarousel(Thread):
     def __init__(self):
         super().__init__()
         self.transport_definitions = []
+        self._outbound_socks_hostname = None
+        self._outbound_socks_port = None
 
     def run(self):
         while True:
@@ -55,16 +63,31 @@ class SSHTransportCarousel(Thread):
         definition = self.transport_definitions.pop()
         self.transport_definitions.insert(0, definition)
 
-        return _establish(definition, host, port)
+        return _establish(definition, host, port, self.get_outbound_proxy())
 
     def get_transports(self) -> List[SSHTransportDefinition]:
         return sorted(self.transport_definitions, key=lambda x: x.index())
 
+    def set_outbound_socks(self, hostname, port):
+        self._outbound_socks_hostname = hostname
+        self._outbound_socks_port = port
 
-def _establish(definition, host, port) -> socket:
+    def get_outbound_proxy(self):
+        if self._outbound_socks_hostname:
+            return self._outbound_socks_hostname, self._outbound_socks_port
+
+    def test_all(self):
+        for transport_def in self.get_transports():
+            # TODO: configurable test target
+            sock = _establish(transport_def, "example.com", 80, self.get_outbound_proxy())
+            if sock:
+                sock.close()
+
+
+def _establish(definition, host, port, proxy_pair) -> socket:
     chan = None
     try:
-        ssh_transport = definition.pickup()
+        ssh_transport = definition.pickup(proxy_pair)
 
         chan = ssh_transport.open_channel(
             "direct-tcpip",
@@ -76,6 +99,7 @@ def _establish(definition, host, port) -> socket:
     if chan is None:
         definition._score = 1
     return chan
+
 
 def get_host_port(full_host: str, default_port: int = 22):
     args = (full_host.split(":", 1) + [default_port])[:2]
@@ -112,7 +136,7 @@ def carousel_from_file(filehandle) -> SSHTransportCarousel:
         if auth_type.lower() in ["pass", "password", "p", "pas"]:
             password = auth
             auth_type_str = "pass"
-        if auth_type.lower() in ["rsa"]:
+        elif auth_type.lower() in ["rsa"]:
             private_key = paramiko.RSAKey.from_private_key_file(auth)
             private_key_path = auth
             auth_type_str = "rsa"
