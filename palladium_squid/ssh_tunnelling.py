@@ -144,6 +144,11 @@ class SSHTransportCarousel(Thread):
                 if sock:
                     sock.close()
 
+    def dump(self, filehandle):
+        with get_context_session(self.session_factory) as session:
+            for definition in session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added):
+                print(definition.dump(), file=filehandle)
+
 
 def _establish(definition: SSHTransportOutline, host, port, proxy_pair) -> Tuple[Optional[socket], int]:
     chan = None

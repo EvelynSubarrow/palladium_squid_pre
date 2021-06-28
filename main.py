@@ -276,5 +276,4 @@ if __name__ == "__main__":
 
     if args.output_file:
         with open(args.output_file, "w") as f:
-            for definition in file_carousel.get_transports():
-                print(definition.dump(), file=f)
+            file_carousel.dump(f)
