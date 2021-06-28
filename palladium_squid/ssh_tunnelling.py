@@ -15,7 +15,7 @@ from sqlalchemy import Column, ForeignKey, ForeignKeyConstraint, UniqueConstrain
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import update
 
-from palladium_squid.util import dprint
+from palladium_squid.util import dprint, get_context_session
 
 log = logging.getLogger("PalladiumSquid")
 
@@ -83,11 +83,10 @@ class SSHTransportDefinition(Base):
 
 
 class SSHTransportCarousel(Thread):
-    def __init__(self, session: Session, session_factory):
+    def __init__(self, session_factory):
         super().__init__()
         self._outbound_socks_hostname = None
         self._outbound_socks_port = None
-        self.session = session
         self.session_factory = session_factory
 
     def run(self):
@@ -95,17 +94,18 @@ class SSHTransportCarousel(Thread):
             time.sleep(0.1)
 
     def setup(self, host, port) -> Optional[socket]:
-        query = self.session.query(SSHTransportDefinition).\
-            filter(SSHTransportDefinition.score == 0).order_by(SSHTransportDefinition.last_connection)
-
-        if query.count():
-            return _establish(query[0], host, port, self.get_outbound_proxy())
-        else:
-            log.error("Run out of OK transports, woe")
-            return None
+        with get_context_session(self.session_factory) as session:
+            query = session.query(SSHTransportDefinition).\
+                filter(SSHTransportDefinition.score == 0).order_by(SSHTransportDefinition.last_connection)
+            if query.count():
+                return _establish(query[0], host, port, self.get_outbound_proxy())
+            else:
+                log.error("Run out of OK transports, woe")
+                return None
 
     def get_transports(self) -> List[SSHTransportDefinition]:
-        return self.session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added)
+        with get_context_session(self.session_factory) as session:
+            return session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added)
 
     def set_outbound_socks(self, hostname, port):
         self._outbound_socks_hostname = hostname
@@ -138,7 +138,7 @@ def _establish(definition, host, port, proxy_pair) -> socket:
         chan = None
         log.error(f"General proxy error trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}")
     except Exception as e:
-        print(traceback.format_exc())
+        log.error(f"Exception trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}: " + traceback.format_exc())
         chan = None
     if chan is None:
         definition.score = 1
@@ -151,70 +151,69 @@ def get_host_port(full_host: str, default_port: int = 22):
     return args[0], args[1]
 
 
-def carousel_from_file(filehandle, session: Session, session_factory) -> SSHTransportCarousel:
-    carousel = SSHTransportCarousel(session, session_factory)
+def carousel_from_file(filehandle, session_factory) -> SSHTransportCarousel:
+    with get_context_session(session_factory) as session:
+        carousel = SSHTransportCarousel(session_factory)
 
-    for row_n, line in enumerate(filehandle):
-        remainder = line.rstrip("\n")
-        username, remainder = remainder.split("@", 1)
-        score = ""
-        if " " in username:
-            score, username = username.split(" ", 1)
-        full_host, remainder = remainder.split(" ", 1)
-        remainder = remainder.lstrip()
+        for row_n, line in enumerate(filehandle):
+            remainder = line.rstrip("\n")
+            username, remainder = remainder.split("@", 1)
+            score = ""
+            if " " in username:
+                score, username = username.split(" ", 1)
+            full_host, remainder = remainder.split(" ", 1)
+            remainder = remainder.lstrip()
 
-        auth_type, auth = remainder.split(" ", 1)
-        username = username.strip()
-        score = score.strip()
-        auth_type = auth_type.strip()
-        if score:
-            score = int(score)
-        else:
-            score = 0
-        hostname, port = get_host_port(full_host.strip())
+            auth_type, auth = remainder.split(" ", 1)
+            username = username.strip()
+            score = score.strip()
+            auth_type = auth_type.strip()
+            if score:
+                score = int(score)
+            else:
+                score = 0
+            hostname, port = get_host_port(full_host.strip())
 
-        password = None
-        private_key = None
-        private_key_path = None
-        auth_type_str = None
+            password = None
+            private_key = None
+            private_key_path = None
+            auth_type_str = None
 
-        if auth_type.lower() in ["pass", "password", "p", "pas"]:
-            password = auth
-            auth_type_str = "pass"
-        elif auth_type.lower() in ["rsa", "ecdsa", "ed25519"]:
-            private_key_path = auth
-            auth_type_str = auth_type
-            with open(private_key_path, "r") as f:
-                query = session.query(KeyFileDefinition).filter(KeyFileDefinition.key_path == private_key_path)
-                if not query.count():
-                    session.add(KeyFileDefinition(key_path=private_key_path, key_contents=f.read()))
-                else:
-                    update_values = {
-                        KeyFileDefinition.key_contents: f.read()
-                    }
-                    session.execute(update(KeyFileDefinition, values=update_values).where(
-                        KeyFileDefinition.key_path == private_key_path))
-        else:
-            log.error(f"Can't process line {row_n+1}, don't recognise auth type {auth_type}")
+            if auth_type.lower() in ["pass", "password", "p", "pas"]:
+                password = auth
+                auth_type_str = "pass"
+            elif auth_type.lower() in ["rsa", "ecdsa", "ed25519"]:
+                private_key_path = auth
+                auth_type_str = auth_type
+                with open(private_key_path, "r") as f:
+                    query = session.query(KeyFileDefinition).filter(KeyFileDefinition.key_path == private_key_path)
+                    if not query.count():
+                        session.add(KeyFileDefinition(key_path=private_key_path, key_contents=f.read()))
+                    else:
+                        update_values = {
+                            KeyFileDefinition.key_contents: f.read()
+                        }
+                        session.execute(update(KeyFileDefinition, values=update_values).where(
+                            KeyFileDefinition.key_path == private_key_path))
+            else:
+                log.error(f"Can't process line {row_n+1}, don't recognise auth type {auth_type}")
 
-        query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.hostname == hostname,
-                                                             SSHTransportDefinition.username == username,
-                                                             SSHTransportDefinition.port == port))
-        if not query.count():
-            session.add(SSHTransportDefinition(hostname=hostname, port=port, username=username, password=password,
-                                   score=score, key_path=private_key_path,
-                                   auth_type_str=auth_type_str, time_added=datetime.utcnow()))
-        else:
-            update_values = {
-                SSHTransportDefinition.password: password,
-                SSHTransportDefinition.key_path: private_key_path,
-                SSHTransportDefinition.auth_type_str: auth_type_str
-            }
-            session.execute(update(SSHTransportDefinition, values=update_values).where(
-                and_(SSHTransportDefinition.hostname == hostname,
-                     SSHTransportDefinition.username == username,
-                     SSHTransportDefinition.port == port)
-            ))
-        session.commit()
-        session.flush()
-    return carousel
+            query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.hostname == hostname,
+                                                                 SSHTransportDefinition.username == username,
+                                                                 SSHTransportDefinition.port == port))
+            if not query.count():
+                session.add(SSHTransportDefinition(hostname=hostname, port=port, username=username, password=password,
+                                       score=score, key_path=private_key_path,
+                                       auth_type_str=auth_type_str, time_added=datetime.utcnow()))
+            else:
+                update_values = {
+                    SSHTransportDefinition.password: password,
+                    SSHTransportDefinition.key_path: private_key_path,
+                    SSHTransportDefinition.auth_type_str: auth_type_str
+                }
+                session.execute(update(SSHTransportDefinition, values=update_values).where(
+                    and_(SSHTransportDefinition.hostname == hostname,
+                         SSHTransportDefinition.username == username,
+                         SSHTransportDefinition.port == port)
+                ))
+        return carousel

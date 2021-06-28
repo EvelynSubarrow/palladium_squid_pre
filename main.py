@@ -5,6 +5,7 @@ from datetime import datetime
 import ipaddress
 import struct
 import argparse
+import threading
 
 # Tredjepart!
 import sqlalchemy
@@ -15,7 +16,7 @@ from termcolor import colored
 from palladium_squid.socks5_util import (breakdown_socks_auth, form_response, SOCKS_ADDRESS_TYPES, SOCKS_COMMANDS,
                                          SOCKS_STATUS_COMMAND_UNSUPPORTED, SOCKS_STATUS_CONNECTION_NOT_ALLOWED,
                                          SOCKS_STATUS_SUCCESS)
-from palladium_squid.util import dprint, setup_logging
+from palladium_squid.util import dprint, setup_logging, get_context_session
 from palladium_squid.ssh_tunnelling import carousel_from_file, create_all, SSHTransportCarousel
 
 SAFE_ASCII = range(32, 128)
@@ -144,6 +145,21 @@ def server_socket(host, port, ip6=True):
     return s
 
 
+def connect_tunnel(conn, carousel, target_host, target_port):
+
+    ssh_socket = carousel.setup(target_host, target_port)
+    if not ssh_socket:
+        conn.append_write(form_response(SOCKS_STATUS_CONNECTION_NOT_ALLOWED))
+    else:
+        ssh_client = Connection(ssh_socket)
+        ssh_client.phase = 3
+        ssh_client.pair = conn
+
+        conn.pair = ssh_client
+        conn.append_write(form_response(SOCKS_STATUS_SUCCESS))
+
+
+
 def mainloop(socks_host, socks_port, carousel):
     read, write = [], []
     server = server_socket(socks_host, socks_port)
@@ -180,18 +196,12 @@ def mainloop(socks_host, socks_port, carousel):
             if client == server:
                 continue
             if client.requested_pair:
-                ssh_socket = carousel.setup(*client.requested_pair)
+                threading.Thread(target=connect_tunnel, args=(client, carousel, *client.requested_pair)).start()
                 client.requested_pair = None
-                if not ssh_socket:
-                    client.append_write(form_response(SOCKS_STATUS_CONNECTION_NOT_ALLOWED))
-                else:
-                    ssh_client = Connection(ssh_socket)
-                    ssh_client.phase = 3
-                    ssh_client.pair = client
-                    client.pair = ssh_client
-                    read.append(ssh_client)
-                    client.append_write(form_response(SOCKS_STATUS_SUCCESS))
-                    client.phase = 4
+            if client.pair and client.phase == 2:
+                read.append(client.pair)
+                client.phase = 4
+
 
         # Write shit
         for c in read:
@@ -247,12 +257,12 @@ if __name__ == "__main__":
 
     create_all(engine)
 
-    with Session() as database_session:
+    with get_context_session(Session) as database_session:
         if args.text_file:
             with open(args.text_file) as f:
-                file_carousel = carousel_from_file(f, database_session, Session)
+                file_carousel = carousel_from_file(f, Session)
         else:
-            file_carousel = SSHTransportCarousel(database_session, Session)
+            file_carousel = SSHTransportCarousel(Session)
 
         if not args.no_tor:
             file_carousel.set_outbound_socks("localhost", 9050)
