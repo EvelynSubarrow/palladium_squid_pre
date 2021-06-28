@@ -30,6 +30,8 @@ and when the database is dumped, it'll reference the original source filename.
 
 Currently supported key types:
 * RSA ('rsa')
+* ECDSA ('ecdsa')
+* ED25519 ('ed25519')
 
 The file format is _not_ tolerant of tabs, at least one space must separate fields. The final field must be separated
 by only _one_ space (it has to be constant because passwords can begin with spaces)
