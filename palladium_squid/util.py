@@ -5,15 +5,19 @@ from termcolor import colored
 log = logging.getLogger("PalladiumSquid")
 
 
-def dprint(c, prefix, is_external, text):
-    log.info(f"{c.address:>15}:{c.port:<5} {prefix} {text}")
+def dprint(c, prefix, is_external, text, level=logging.DEBUG):
+    log.log(level=level, msg=f"{c.address:>15}:{c.port:<5} {prefix} {text}")
 
-def setup_logging():
+def setup_logging(verbose):
     ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
 
     log = logging.getLogger("PalladiumSquid")
-    log.setLevel(logging.DEBUG)
+    if verbose:
+        ch.setLevel(logging.DEBUG)
+        log.setLevel(logging.DEBUG)
+    else:
+        ch.setLevel(logging.INFO)
+        log.setLevel(logging.INFO)
     log.propagate = False
 
     format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s", '%Y-%m-%dT%H:%M:%S%z')

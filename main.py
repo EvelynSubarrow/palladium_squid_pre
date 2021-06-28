@@ -226,7 +226,6 @@ def testloop(carousel):
 
 
 if __name__ == "__main__":
-    setup_logging()
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-tor", "-N", action='store_true', default=False, help="By default, tor is enabled. Use "
@@ -250,8 +249,11 @@ if __name__ == "__main__":
     action2.add_argument("-t", "--test", action='store_true', help="Checks credentials, dumps to file")
 
     parser.add_argument("-o", "--output-file", help="File to dump text rows to")
+    parser.add_argument("-v", "--verbose", action="store_true", default=False)
 
     args = parser.parse_args()
+
+    setup_logging(args.verbose)
 
     engine = sqlalchemy.create_engine(args.database_uri)
     session_factory = sessionmaker(bind=engine, autoflush=False)
