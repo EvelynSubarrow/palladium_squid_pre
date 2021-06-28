@@ -53,6 +53,12 @@ class SSHTransportDefinition(Base):
     def get_private_key(self):
         if self.auth_type_str == "rsa":
             return paramiko.RSAKey.from_private_key(StringIO(self.key_rel.key_contents))
+        elif self.auth_type_str == "ecdsa":
+            return paramiko.ECDSAKey.from_private_key(StringIO(self.key_rel.key_contents))
+        elif self.auth_type_str == "ed25519":
+            return paramiko.Ed25519Key.from_private_key(StringIO(self.key_rel.key_contents))
+        else:
+            raise ValueError(f"Unknown keytype {self.auth_type_str}")
 
     # noinspection PyTypeChecker
     def pickup(self, proxy_pair) -> paramiko.Transport:
@@ -95,8 +101,7 @@ class SSHTransportCarousel(Thread):
         if query.count():
             return _establish(query[0], host, port, self.get_outbound_proxy())
         else:
-
-            # TODO: dire error message
+            log.error("Run out of OK transports, woe")
             return None
 
     def get_transports(self) -> List[SSHTransportDefinition]:
@@ -158,6 +163,7 @@ def carousel_from_file(filehandle, session: Session, session_factory) -> SSHTran
         auth_type, auth = remainder.split(" ", 1)
         username = username.strip()
         score = score.strip()
+        auth_type = auth_type.strip()
         if score:
             score = int(score)
         else:
@@ -172,9 +178,9 @@ def carousel_from_file(filehandle, session: Session, session_factory) -> SSHTran
         if auth_type.lower() in ["pass", "password", "p", "pas"]:
             password = auth
             auth_type_str = "pass"
-        elif auth_type.lower() in ["rsa"]:
+        elif auth_type.lower() in ["rsa", "ecdsa", "ed25519"]:
             private_key_path = auth
-            auth_type_str = "rsa"
+            auth_type_str = auth_type
             with open(private_key_path, "r") as f:
                 query = session.query(KeyFileDefinition).filter(KeyFileDefinition.key_path == private_key_path)
                 if not query.count():
@@ -185,6 +191,8 @@ def carousel_from_file(filehandle, session: Session, session_factory) -> SSHTran
                     }
                     session.execute(update(KeyFileDefinition, values=update_values).where(
                         KeyFileDefinition.key_path == private_key_path))
+        else:
+            logging.error(f"Can't process line {row_n+1}, don't recognise auth type {auth_type}")
 
         query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.hostname == hostname,
                                                              SSHTransportDefinition.username == username,
