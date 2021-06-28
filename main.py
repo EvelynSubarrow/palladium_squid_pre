@@ -141,7 +141,7 @@ def server_socket(host, port, ip6=True):
     s = socket.socket(s_flags)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((host, port))
-    s.listen(10)
+    s.listen(15)
     return s
 
 
@@ -187,6 +187,8 @@ def mainloop(socks_host, socks_port, carousel):
                     for connection_list in [read, write]:
                         if c in connection_list:
                             connection_list.remove(c)
+                    if c.pair:
+                        c.pair.disconnect("Other side of pair disconnected")
                 else:
                     c.read_buffer += new_data
                     process(c, carousel)
