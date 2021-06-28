@@ -40,5 +40,5 @@ def breakdown_socks_auth(auth_string: bytes):
     return ", ".join([f"""0x{a:02x} '{SOCKS_AUTH_METHODS.get(int(a), "Unknown")}'""" for a in auth_string])
 
 
-def form_response(status, formed_address):
-    return struct.pack("!BBB", 5, status, 0) + formed_address
+def form_response(status):
+    return struct.pack("!BBB", 5, status, 0) + b'\x01\x00\x00\x00\x00\x00\x00'

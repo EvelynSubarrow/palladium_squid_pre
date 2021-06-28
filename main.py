@@ -119,10 +119,10 @@ def process(c: Connection, carousel):
                 dprint(c, "<<", True, f"SOCKS {SOCKS_COMMANDS.get(command, 'Invalid command')} -> {SOCKS_ADDRESS_TYPES[address_type]} {address} :{port}")
                 if command != 1:
                     # For now we don't support UDP or TCP bind
-                    c.append_write(form_response(SOCKS_STATUS_COMMAND_UNSUPPORTED, encoded_address))
+                    c.append_write(form_response(SOCKS_STATUS_COMMAND_UNSUPPORTED))
                 elif any([int(a) not in SAFE_ASCII for a in address]):
                     # If it's not ascii you're doing something weird, go away
-                    c.append_write(form_response(SOCKS_STATUS_CONNECTION_NOT_ALLOWED, encoded_address))
+                    c.append_write(form_response(SOCKS_STATUS_CONNECTION_NOT_ALLOWED))
                     dprint(c, "--", True, f"Invalid characters in address")
                 else:
                     c.requested_pair = (address.decode("ascii"), port)
@@ -180,16 +180,14 @@ def mainloop(socks_host, socks_port, carousel):
                 ssh_socket = carousel.setup(*client.requested_pair)
                 client.requested_pair = None
                 if not ssh_socket:
-                    client.append_write(form_response(SOCKS_STATUS_CONNECTION_NOT_ALLOWED,
-                                                 b"\x01\x00\x00\x00\x00" + struct.pack("!H", client.port)))
+                    client.append_write(form_response(SOCKS_STATUS_CONNECTION_NOT_ALLOWED))
                 else:
                     ssh_client = Connection(ssh_socket)
                     ssh_client.phase = 3
                     ssh_client.pair = client
                     client.pair = ssh_client
                     read.append(ssh_client)
-                    client.append_write(form_response(SOCKS_STATUS_SUCCESS,
-                                                 b"\x01\x00\x00\x00\x00" + struct.pack("!H", client.port)))
+                    client.append_write(form_response(SOCKS_STATUS_SUCCESS))
                     client.phase = 4
 
         # Write shit
