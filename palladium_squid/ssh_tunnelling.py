@@ -1,7 +1,7 @@
 import logging
 from io import StringIO
 from threading import Thread, Lock
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import time
 from socket import socket
 import traceback
@@ -123,12 +123,9 @@ class SSHTransportCarousel(Thread):
                 log.error("Run out of OK transports, woe")
                 return None
 
-    def setup(self, transport_outline, host, port) -> Optional[socket]:
+    def setup(self, transport_outline, host, port) -> Tuple[Optional[socket], int]:
         return _establish(transport_outline, host, port, self.get_outbound_proxy())
 
-    def get_transports(self) -> List[SSHTransportDefinition]:
-        with get_context_session(self.session_factory) as session:
-            return session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added)
 
     def set_outbound_socks(self, hostname, port):
         self._outbound_socks_hostname = hostname
@@ -139,15 +136,18 @@ class SSHTransportCarousel(Thread):
             return self._outbound_socks_hostname, self._outbound_socks_port
 
     def test_all(self):
-        for transport_def in self.get_transports():
-            # TODO: configurable test target
-            sock = _establish(transport_def.get_outline(), "example.com", 80, self.get_outbound_proxy())
-            if sock:
-                sock.close()
+        with get_context_session(self.session_factory) as session:
+            for transport_def in session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added):
+                # TODO: configurable test target
+                sock, stat = _establish(transport_def.get_outline(), "example.com", 80, self.get_outbound_proxy())
+                transport_def.score = stat
+                if sock:
+                    sock.close()
 
 
-def _establish(definition: SSHTransportOutline, host, port, proxy_pair) -> socket:
+def _establish(definition: SSHTransportOutline, host, port, proxy_pair) -> Tuple[Optional[socket], int]:
     chan = None
+    stat = 0
     try:
         ssh_transport = definition.pickup(proxy_pair)
 
@@ -156,14 +156,18 @@ def _establish(definition: SSHTransportOutline, host, port, proxy_pair) -> socke
             (host, port),
             ('Unknown', 0),  # This is supposed to be the peer name
         )
+        if chan is None:
+            stat = 1
     except socks.GeneralProxyError as e:
         chan = None
         log.error(f"General proxy error trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}")
+        stat = 2
     except Exception as e:
         log.error(f"Exception trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}: " + traceback.format_exc())
         chan = None
+        stat = 3
 
-    return chan
+    return chan, stat
 
 
 def get_host_port(full_host: str, default_port: int = 22):

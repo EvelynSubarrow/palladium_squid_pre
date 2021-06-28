@@ -146,8 +146,7 @@ def server_socket(host, port, ip6=True):
 
 
 def connect_tunnel(conn, carousel, target_host, target_port, outline):
-
-    ssh_socket = carousel.setup(outline, target_host, target_port)
+    ssh_socket, status = carousel.setup(outline, target_host, target_port)
     if not ssh_socket:
         conn.append_write(form_response(SOCKS_STATUS_CONNECTION_NOT_ALLOWED))
     else:
