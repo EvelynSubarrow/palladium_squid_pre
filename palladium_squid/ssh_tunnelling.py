@@ -241,4 +241,6 @@ def carousel_from_file(filehandle, session_factory) -> SSHTransportCarousel:
                          SSHTransportDefinition.username == username,
                          SSHTransportDefinition.port == port)
                 ))
+            session.commit()
+            session.flush()
         return carousel
