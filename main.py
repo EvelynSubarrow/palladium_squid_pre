@@ -127,8 +127,7 @@ def process(c: Connection, carousel):
                 else:
                     c.requested_pair = (address.decode("ascii"), port)
     elif c.phase == 2:
-        pass # Awaiting pickup this end
-
+        pass  # Awaiting pickup this end
     elif c.phase in [3, 4]:
         c.pair.append_write(c.read_buffer)
         c.read_buffer = b''
@@ -162,7 +161,11 @@ def mainloop(socks_host, socks_port, carousel):
                 dprint(client, "--", 1, "Connected")
                 read.append(client)
             else:
-                new_data = c.recv(1024)
+                new_data = b''
+                try:
+                    new_data = c.recv(1024)
+                except ConnectionResetError as e:
+                    dprint(c, '--', 1, f"Connection reset")
                 if not len(new_data):
                     dprint(c, "--", 1, f"Disconnected by remote end")
                     for connection_list in [read, write]:
@@ -247,9 +250,9 @@ if __name__ == "__main__":
     with Session() as database_session:
         if args.text_file:
             with open(args.text_file) as f:
-                file_carousel = carousel_from_file(f, database_session)
+                file_carousel = carousel_from_file(f, database_session, Session)
         else:
-            file_carousel = SSHTransportCarousel(database_session)
+            file_carousel = SSHTransportCarousel(database_session, Session)
 
         if not args.no_tor:
             file_carousel.set_outbound_socks("localhost", 9050)

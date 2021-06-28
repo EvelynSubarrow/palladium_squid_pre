@@ -74,11 +74,12 @@ class SSHTransportDefinition(Base):
 
 
 class SSHTransportCarousel(Thread):
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, session_factory):
         super().__init__()
         self._outbound_socks_hostname = None
         self._outbound_socks_port = None
         self.session = session
+        self.session_factory = session_factory
 
     def run(self):
         while True:
@@ -138,7 +139,7 @@ def get_host_port(full_host: str, default_port: int = 22):
     return args[0], args[1]
 
 
-def carousel_from_file(filehandle, session: Session) -> SSHTransportCarousel:
+def carousel_from_file(filehandle, session: Session, session_factory) -> SSHTransportCarousel:
     carousel = SSHTransportCarousel(session)
 
     for row_n, line in enumerate(filehandle):
