@@ -95,9 +95,13 @@ class SSHTransportCarousel(Thread):
 
     def setup(self, host, port) -> Optional[socket]:
         with get_context_session(self.session_factory) as session:
+
             query = session.query(SSHTransportDefinition).\
                 filter(SSHTransportDefinition.score == 0).order_by(SSHTransportDefinition.last_connection)
             if query.count():
+                query[0].last_connection = datetime.now()
+                session.commit()
+                session.flush()
                 return _establish(query[0], host, port, self.get_outbound_proxy())
             else:
                 log.error("Run out of OK transports, woe")

@@ -36,6 +36,7 @@ class SessionWrapper:
             self.session.rollback()
         elif self.commit:
             self.session.commit()
+            self.session.flush()
 
 
 def get_context_session(session_class):
