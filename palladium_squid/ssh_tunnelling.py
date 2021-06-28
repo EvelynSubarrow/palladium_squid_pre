@@ -140,7 +140,7 @@ def get_host_port(full_host: str, default_port: int = 22):
 
 
 def carousel_from_file(filehandle, session: Session, session_factory) -> SSHTransportCarousel:
-    carousel = SSHTransportCarousel(session)
+    carousel = SSHTransportCarousel(session, session_factory)
 
     for row_n, line in enumerate(filehandle):
         remainder = line.rstrip("\n")
