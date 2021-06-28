@@ -1,3 +1,4 @@
+import logging
 from io import StringIO
 from threading import Thread, Lock
 from typing import List, Optional
@@ -15,6 +16,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import update
 
 from palladium_squid.util import dprint
+
+log = logging.getLogger("PalladiumSquid")
 
 Base = declarative_base()
 
@@ -92,6 +95,7 @@ class SSHTransportCarousel(Thread):
         if query.count():
             return _establish(query[0], host, port, self.get_outbound_proxy())
         else:
+
             # TODO: dire error message
             return None
 
@@ -169,7 +173,6 @@ def carousel_from_file(filehandle, session: Session, session_factory) -> SSHTran
             password = auth
             auth_type_str = "pass"
         elif auth_type.lower() in ["rsa"]:
-            private_key = paramiko.RSAKey.from_private_key_file(auth)
             private_key_path = auth
             auth_type_str = "rsa"
             with open(private_key_path, "r") as f:
@@ -183,23 +186,23 @@ def carousel_from_file(filehandle, session: Session, session_factory) -> SSHTran
                     session.execute(update(KeyFileDefinition, values=update_values).where(
                         KeyFileDefinition.key_path == private_key_path))
 
-            query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.hostname == hostname,
-                                                                 SSHTransportDefinition.username == username,
-                                                                 SSHTransportDefinition.port == port))
-            if not query.count():
-                session.add(SSHTransportDefinition(hostname=hostname, port=port, username=username, password=password,
-                                       score=score, key_path=private_key_path,
-                                       auth_type_str=auth_type_str, time_added=datetime.utcnow()))
-            else:
-                update_values = {
-                    SSHTransportDefinition.password: password,
-                    SSHTransportDefinition.key_path: private_key_path,
-                    SSHTransportDefinition.auth_type_str: auth_type_str
-                }
-                session.execute(update(SSHTransportDefinition, values=update_values).where(
-                    and_(SSHTransportDefinition.hostname == hostname,
-                         SSHTransportDefinition.username == username,
-                         SSHTransportDefinition.port == port)
-                ))
-            session.commit()
+        query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.hostname == hostname,
+                                                             SSHTransportDefinition.username == username,
+                                                             SSHTransportDefinition.port == port))
+        if not query.count():
+            session.add(SSHTransportDefinition(hostname=hostname, port=port, username=username, password=password,
+                                   score=score, key_path=private_key_path,
+                                   auth_type_str=auth_type_str, time_added=datetime.utcnow()))
+        else:
+            update_values = {
+                SSHTransportDefinition.password: password,
+                SSHTransportDefinition.key_path: private_key_path,
+                SSHTransportDefinition.auth_type_str: auth_type_str
+            }
+            session.execute(update(SSHTransportDefinition, values=update_values).where(
+                and_(SSHTransportDefinition.hostname == hostname,
+                     SSHTransportDefinition.username == username,
+                     SSHTransportDefinition.port == port)
+            ))
+        session.commit()
     return carousel
