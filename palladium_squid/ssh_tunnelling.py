@@ -167,10 +167,26 @@ def _establish(definition: SSHTransportOutline, host, port, proxy_pair) -> Tuple
         chan = None
         log.error(f"General proxy error trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}")
         stat = 2
+    except paramiko.ssh_exception.SSHException:
+        chan = None
+        log.error(f"SSH error trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}")
+        stat = 3
+    except TimeoutError:
+        chan = None
+        log.error(f"Timeout error trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}")
+        stat = 4
+    except OSError:
+        chan = None
+        log.error(f"Timeout or OSError trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}")
+        stat = 5
+    except EOFError:
+        chan = None
+        log.error(f"EOF error trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}")
+        stat = 6
     except Exception as e:
         log.error(f"Exception trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}: " + traceback.format_exc())
         chan = None
-        stat = 3
+        stat = 20
 
     return chan, stat
 
