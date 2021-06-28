@@ -40,7 +40,7 @@ class SSHTransportDefinition(Base):
     username = Column(VARCHAR, nullable=False, primary_key=True)
     password = Column(VARCHAR, nullable=True)
     key_path = Column(VARCHAR, ForeignKey(KeyFileDefinition.key_path), nullable=True)
-    key_rel: KeyFileDefinition = relationship("KeyFileDefinition", uselist=False, lazy="joined", innerjoin=True)
+    key_rel: KeyFileDefinition = relationship("KeyFileDefinition", uselist=False, lazy="select", innerjoin=True)
 
     hostname = Column(VARCHAR, nullable=False, primary_key=True)
     port = Column(SMALLINT, nullable=False, primary_key=True)
@@ -134,11 +134,14 @@ def _establish(definition, host, port, proxy_pair) -> socket:
             (host, port),
             ('Unknown', 0),  # This is supposed to be the peer name
         )
+    except socks.GeneralProxyError as e:
+        chan = None
+        log.error(f"General proxy error trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}")
     except Exception as e:
         print(traceback.format_exc())
         chan = None
     if chan is None:
-        definition._score = 1
+        definition.score = 1
     return chan
 
 
@@ -192,7 +195,7 @@ def carousel_from_file(filehandle, session: Session, session_factory) -> SSHTran
                     session.execute(update(KeyFileDefinition, values=update_values).where(
                         KeyFileDefinition.key_path == private_key_path))
         else:
-            logging.error(f"Can't process line {row_n+1}, don't recognise auth type {auth_type}")
+            log.error(f"Can't process line {row_n+1}, don't recognise auth type {auth_type}")
 
         query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.hostname == hostname,
                                                              SSHTransportDefinition.username == username,
@@ -213,4 +216,5 @@ def carousel_from_file(filehandle, session: Session, session_factory) -> SSHTran
                      SSHTransportDefinition.port == port)
             ))
         session.commit()
+        session.flush()
     return carousel
