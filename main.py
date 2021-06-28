@@ -145,9 +145,9 @@ def server_socket(host, port, ip6=True):
     return s
 
 
-def connect_tunnel(conn, carousel, target_host, target_port):
+def connect_tunnel(conn, carousel, target_host, target_port, outline):
 
-    ssh_socket = carousel.setup(target_host, target_port)
+    ssh_socket = carousel.setup(outline, target_host, target_port)
     if not ssh_socket:
         conn.append_write(form_response(SOCKS_STATUS_CONNECTION_NOT_ALLOWED))
     else:
@@ -198,7 +198,8 @@ def mainloop(socks_host, socks_port, carousel):
             if client == server:
                 continue
             if client.requested_pair:
-                threading.Thread(target=connect_tunnel, args=(client, carousel, *client.requested_pair)).start()
+                threading.Thread(target=connect_tunnel, args=(client, carousel, *client.requested_pair,
+                                                              carousel.next_transport_outline())).start()
                 client.requested_pair = None
             if client.pair and client.phase == 2:
                 read.append(client.pair)
@@ -254,28 +255,27 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     engine = sqlalchemy.create_engine(args.database_uri)
-    session_factory = sessionmaker(bind=engine, autoflush=True)
+    session_factory = sessionmaker(bind=engine, autoflush=False)
     Session = scoped_session(session_factory)
 
     create_all(engine)
 
-    with get_context_session(Session) as database_session:
-        if args.text_file:
-            with open(args.text_file) as f:
-                file_carousel = carousel_from_file(f, Session)
-        else:
-            file_carousel = SSHTransportCarousel(Session)
+    if args.text_file:
+        with open(args.text_file) as f:
+            file_carousel = carousel_from_file(f, Session)
+    else:
+        file_carousel = SSHTransportCarousel(Session)
 
-        if not args.no_tor:
-            file_carousel.set_outbound_socks("localhost", 9050)
+    if not args.no_tor:
+        file_carousel.set_outbound_socks("localhost", 9050)
 
-        if args.proxy:
-            mainloop(args.socks_bind, args.socks_host, file_carousel)
+    if args.proxy:
+        mainloop(args.socks_bind, args.socks_host, file_carousel)
 
-        if args.test:
-            testloop(file_carousel)
+    if args.test:
+        testloop(file_carousel)
 
-        if args.output_file:
-            with open(args.output_file, "w") as f:
-                for definition in file_carousel.get_transports():
-                    print(definition.dump(), file=f)
+    if args.output_file:
+        with open(args.output_file, "w") as f:
+            for definition in file_carousel.get_transports():
+                print(definition.dump(), file=f)

@@ -57,8 +57,29 @@ class SSHTransportDefinition(Base):
             return paramiko.ECDSAKey.from_private_key(StringIO(self.key_rel.key_contents))
         elif self.auth_type_str == "ed25519":
             return paramiko.Ed25519Key.from_private_key(StringIO(self.key_rel.key_contents))
+        elif self.auth_type_str == "pass":
+            return None
         else:
             raise ValueError(f"Unknown keytype {self.auth_type_str}")
+
+    def get_outline(self):
+        return SSHTransportOutline(self.username, self.hostname, self.port, self.password, self.get_private_key())
+
+    def dump(self) -> str:
+        return f"{self.score:<3} {self.username}@{self.hostname:16}" + f":{self.port}"*(self.port != 22) + \
+               f" {self.auth_type_str:>5} " + (self.password or self.key_path)
+
+    def index(self):
+        return self._order
+
+
+class SSHTransportOutline:
+    def __init__(self, username, hostname, port, password, key):
+        self.username = username
+        self.password = password
+        self.hostname = hostname
+        self.port = port
+        self.key = key
 
     # noinspection PyTypeChecker
     def pickup(self, proxy_pair) -> paramiko.Transport:
@@ -71,15 +92,8 @@ class SSHTransportDefinition(Base):
         s.connect((self.hostname, self.port))
 
         transport = paramiko.Transport(s)
-        transport.connect(username=self.username, password=self.password, pkey=self.get_private_key())
+        transport.connect(username=self.username, password=self.password, pkey=self.key)
         return transport
-
-    def dump(self) -> str:
-        return f"{self.score:<3} {self.username}@{self.hostname:16}" + f":{self.port}"*(self.port != 22) + \
-               f" {self.auth_type_str:>5} " + (self.password or self.key_path)
-
-    def index(self):
-        return self._order
 
 
 class SSHTransportCarousel(Thread):
@@ -93,19 +107,24 @@ class SSHTransportCarousel(Thread):
         while True:
             time.sleep(0.1)
 
-    def setup(self, host, port) -> Optional[socket]:
+    def next_transport_outline(self):
         with get_context_session(self.session_factory) as session:
 
             query = session.query(SSHTransportDefinition).\
                 filter(SSHTransportDefinition.score == 0).order_by(SSHTransportDefinition.last_connection)
             if query.count():
-                query[0].last_connection = datetime.now()
+                transport = query[0]
+                transport.last_connection = datetime.now()
                 session.commit()
                 session.flush()
-                return _establish(query[0], host, port, self.get_outbound_proxy())
+
+                return transport.get_outline()
             else:
                 log.error("Run out of OK transports, woe")
                 return None
+
+    def setup(self, transport_outline, host, port) -> Optional[socket]:
+        return _establish(transport_outline, host, port, self.get_outbound_proxy())
 
     def get_transports(self) -> List[SSHTransportDefinition]:
         with get_context_session(self.session_factory) as session:
@@ -122,15 +141,14 @@ class SSHTransportCarousel(Thread):
     def test_all(self):
         for transport_def in self.get_transports():
             # TODO: configurable test target
-            sock = _establish(transport_def, "example.com", 80, self.get_outbound_proxy())
+            sock = _establish(transport_def.get_outline(), "example.com", 80, self.get_outbound_proxy())
             if sock:
                 sock.close()
 
 
-def _establish(definition, host, port, proxy_pair) -> socket:
+def _establish(definition: SSHTransportOutline, host, port, proxy_pair) -> socket:
     chan = None
     try:
-        definition.last_connection = datetime.now()
         ssh_transport = definition.pickup(proxy_pair)
 
         chan = ssh_transport.open_channel(
@@ -144,8 +162,7 @@ def _establish(definition, host, port, proxy_pair) -> socket:
     except Exception as e:
         log.error(f"Exception trying to connect to {host}:{port} via {definition.username}@{definition.hostname}:{definition.port}: " + traceback.format_exc())
         chan = None
-    if chan is None:
-        definition.score = 1
+
     return chan
 
 
