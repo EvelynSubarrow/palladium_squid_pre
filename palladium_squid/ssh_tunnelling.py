@@ -149,6 +149,21 @@ class SSHTransportCarousel(Thread):
             for definition in session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added):
                 print(definition.dump(), file=filehandle)
 
+    def update_transport_score(self, outline: SSHTransportOutline, new_score: int):
+        with get_context_session(self.session_factory) as session:
+            update_values = {
+                SSHTransportDefinition.score: new_score,
+            }
+            session.execute(update(SSHTransportDefinition, values=update_values).where(
+                and_(
+                    SSHTransportDefinition.hostname == outline.hostname,
+                    SSHTransportDefinition.username == outline.username,
+                    SSHTransportDefinition.port == outline.port,
+                )
+            ))
+            session.commit()
+            session.flush()
+
 
 def _establish(definition: SSHTransportOutline, host, port, proxy_pair) -> Tuple[Optional[socket], int]:
     chan = None

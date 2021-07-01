@@ -35,8 +35,9 @@ class Connection:
         self.write_buffer = b""
 
         self.pair = None
-
         self.requested_pair = None
+        self.pair_transport = None
+        self.pair_score = 0
 
         self.closed = False
 
@@ -147,6 +148,8 @@ def server_socket(host, port, ip6=True):
 
 def connect_tunnel(conn, carousel, target_host, target_port, outline):
     ssh_socket, status = carousel.setup(outline, target_host, target_port)
+    conn.pair_transport = outline
+    conn.pair_score = status
     if not ssh_socket:
         conn.append_write(form_response(SOCKS_STATUS_CONNECTION_NOT_ALLOWED))
     else:
@@ -200,6 +203,9 @@ def mainloop(socks_host, socks_port, carousel):
                 threading.Thread(target=connect_tunnel, args=(client, carousel, *client.requested_pair,
                                                               carousel.next_transport_outline())).start()
                 client.requested_pair = None
+            if client.pair_transport and client.pair_score:
+                carousel.update_transport_score(client.pair_transport, client.pair_score)
+                client.pair_score = 0
             if client.pair and client.phase == 2:
                 read.append(client.pair)
                 client.phase = 4
