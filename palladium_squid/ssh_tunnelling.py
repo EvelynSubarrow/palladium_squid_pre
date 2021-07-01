@@ -1,6 +1,6 @@
 import logging
 from io import StringIO
-from threading import Thread, Lock
+from threading import Thread
 from typing import List, Optional, Tuple
 import time
 from socket import socket
@@ -9,11 +9,9 @@ from datetime import datetime, timedelta
 
 import paramiko
 import socks
-from sqlalchemy.orm import sessionmaker, relationship, Session
-from sqlalchemy import Column, ForeignKey, ForeignKeyConstraint, UniqueConstraint, CHAR, VARCHAR, JSON, SMALLINT, \
-    INTEGER, DATE, BOOLEAN, TIMESTAMP, TIME, ARRAY, BLOB, and_
+from sqlalchemy.orm import relationship
+from sqlalchemy import Column, ForeignKey,  UniqueConstraint, VARCHAR, JSON, SMALLINT, INTEGER, TIMESTAMP, and_, update
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import update
 
 from palladium_squid.util import dprint, get_context_session
 
@@ -136,7 +134,6 @@ class SSHTransportCarousel(Thread):
 
     def setup(self, transport_outline, host, port) -> Tuple[Optional[socket], int]:
         return _establish(transport_outline, host, port, self.get_outbound_proxy())
-
 
     def set_outbound_socks(self, hostname, port):
         self._outbound_socks_hostname = hostname

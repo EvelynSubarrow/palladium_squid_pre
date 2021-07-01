@@ -1,12 +1,11 @@
 import logging
-from datetime import datetime
-from termcolor import colored
 
 log = logging.getLogger("PalladiumSquid")
 
 
 def dprint(c, prefix, is_external, text, level=logging.DEBUG):
     log.log(level=level, msg=f"{c.address:>15}:{c.port:<5} {prefix} {text}")
+
 
 def setup_logging(verbose):
     ch = logging.StreamHandler()

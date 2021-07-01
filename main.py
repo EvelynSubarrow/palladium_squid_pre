@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import logging
-import socket, select
+import socket
+import select
 from datetime import datetime
 import ipaddress
 import struct
@@ -10,7 +11,6 @@ import threading
 # Tredjepart!
 import sqlalchemy
 from sqlalchemy.orm import scoped_session, sessionmaker
-from termcolor import colored
 
 # Internal
 from palladium_squid.socks5_util import (breakdown_socks_auth, form_response, SOCKS_ADDRESS_TYPES, SOCKS_COMMANDS,
