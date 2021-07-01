@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 import time
 from socket import socket
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import paramiko
 import socks
@@ -105,13 +105,22 @@ class SSHTransportCarousel(Thread):
 
     def run(self):
         while True:
-            time.sleep(0.1)
+            time.sleep(1)
+            transport_to_test = self.next_transport_outline(True)
+            if transport_to_test:
+                logging.info(f"Testing previously failed transport {transport_to_test.username}@{transport_to_test.hostname}:{transport_to_test.port}")
+                sock, stat = _establish(transport_to_test, "example.com", 80, self.get_outbound_proxy())
+                if sock:
+                    sock.close()
+                    self.update_transport_score(transport_to_test, stat)
 
-    def next_transport_outline(self):
+    def next_transport_outline(self, only_dead=False):
         with get_context_session(self.session_factory) as session:
 
-            query = session.query(SSHTransportDefinition).\
-                filter(SSHTransportDefinition.score == 0).order_by(SSHTransportDefinition.last_connection)
+            if only_dead:
+                query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.score != 0, SSHTransportDefinition.last_connection > datetime.now() + timedelta(minutes=10))).order_by(SSHTransportDefinition.last_connection)
+            else:
+                query = session.query(SSHTransportDefinition).filter(SSHTransportDefinition.score == 0).order_by(SSHTransportDefinition.last_connection)
             if query.count():
                 transport = query[0]
                 transport.last_connection = datetime.now()
@@ -120,7 +129,9 @@ class SSHTransportCarousel(Thread):
 
                 return transport.get_outline()
             else:
-                log.error("Run out of OK transports, woe")
+                # If we're just fetching for tests there's no point complaining, this is an expected and ok/good outcome
+                if not only_dead:
+                    log.error("Run out of OK transports, woe")
                 return None
 
     def setup(self, transport_outline, host, port) -> Tuple[Optional[socket], int]:

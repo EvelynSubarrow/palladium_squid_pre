@@ -277,6 +277,8 @@ if __name__ == "__main__":
         file_carousel.set_outbound_socks("localhost", 9050)
 
     if args.proxy:
+        if not args.no_test:
+            file_carousel.start()
         mainloop(args.socks_bind, args.socks_host, file_carousel)
 
     if args.test:
