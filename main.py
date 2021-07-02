@@ -169,7 +169,8 @@ def mainloop(socks_host, socks_port, carousel):
     write = []
 
     while True:
-        r, w, x = select.select(read, write, [], 1)
+        read = [a for a in read if a.fileno() > 0]
+        r, w, x = select.select(read, [], [], 1)
         ut_now = int(datetime.now().timestamp())
 
         # Pick up new clients, process data
