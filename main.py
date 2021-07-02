@@ -173,6 +173,8 @@ def mainloop(socks_host, socks_port, carousel):
     while True:
         read = [a for a in read if a.fileno() > 0]
         r, w, x = select.select(read, [], [], 1)
+
+
         ut_now = int(datetime.now().timestamp())
 
         # Pick up new clients, process data
@@ -204,10 +206,10 @@ def mainloop(socks_host, socks_port, carousel):
                 continue
             if client.requested_pair:
                 threading.Thread(target=connect_tunnel, args=(client, carousel, *client.requested_pair,
-                                                              carousel.next_transport_outline())).start()
+                                                              carousel.next_transport_outline(carousel.session))).start()
                 client.requested_pair = None
             if client.pair_transport and client.pair_score:
-                carousel.update_transport_score(client.pair_transport, client.pair_score)
+                carousel.update_transport_score(client.pair_transport, client.pair_score, carousel.session)
                 client.pair_score = 0
             if client.pair and client.phase == 2:
                 read.append(client.pair)
@@ -270,23 +272,24 @@ if __name__ == "__main__":
 
     create_all(engine)
 
-    if args.text_file:
-        with open(args.text_file) as f:
-            file_carousel = carousel_from_file(f, Session)
-    else:
-        file_carousel = SSHTransportCarousel(Session)
+    with get_context_session(Session) as session:
+        if args.text_file:
+            with open(args.text_file) as f:
+                file_carousel = carousel_from_file(f, Session, session)
+        else:
+            file_carousel = SSHTransportCarousel(Session, session)
 
-    if not args.no_tor:
-        file_carousel.set_outbound_socks("localhost", 9050)
+        if not args.no_tor:
+            file_carousel.set_outbound_socks("localhost", 9050)
 
-    if args.proxy:
-        if not args.no_test:
-            file_carousel.start()
-        mainloop(args.socks_bind, args.socks_host, file_carousel)
+        if args.proxy:
+            if not args.no_test:
+                file_carousel.start()
+            mainloop(args.socks_bind, args.socks_host, file_carousel)
 
-    if args.test:
-        testloop(file_carousel)
+        if args.test:
+            testloop(file_carousel)
 
-    if args.output_file:
-        with open(args.output_file, "w") as f:
-            file_carousel.dump(f)
+        if args.output_file:
+            with open(args.output_file, "w") as f:
+                file_carousel.dump(f)

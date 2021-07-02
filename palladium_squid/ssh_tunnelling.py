@@ -95,42 +95,42 @@ class SSHTransportOutline:
 
 
 class SSHTransportCarousel(Thread):
-    def __init__(self, session_factory):
+    def __init__(self, session_factory, session):
         super().__init__()
         self._outbound_socks_hostname = None
         self._outbound_socks_port = None
         self.session_factory = session_factory
+        self.session = session
 
     def run(self):
-        while True:
-            time.sleep(1)
-            transport_to_test = self.next_transport_outline(True)
-            if transport_to_test:
-                logging.info(f"Testing previously failed transport {transport_to_test.username}@{transport_to_test.hostname}:{transport_to_test.port}")
-                sock, stat = _establish(transport_to_test, "example.com", 80, self.get_outbound_proxy())
-                if sock:
-                    sock.close()
-                    self.update_transport_score(transport_to_test, stat)
-
-    def next_transport_outline(self, only_dead=False):
         with get_context_session(self.session_factory) as session:
+            while True:
+                time.sleep(1)
+                transport_to_test = self.next_transport_outline(session, True)
+                if transport_to_test:
+                    logging.info(f"Testing previously failed transport {transport_to_test.username}@{transport_to_test.hostname}:{transport_to_test.port}")
+                    sock, stat = _establish(transport_to_test, "example.com", 80, self.get_outbound_proxy())
+                    if sock:
+                        sock.close()
+                        self.update_transport_score(transport_to_test, stat, session)
 
-            if only_dead:
-                query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.score != 0, SSHTransportDefinition.last_connection > datetime.now() + timedelta(minutes=10))).order_by(SSHTransportDefinition.last_connection)
-            else:
-                query = session.query(SSHTransportDefinition).filter(SSHTransportDefinition.score == 0).order_by(SSHTransportDefinition.last_connection)
-            if query.count():
-                transport = query[0]
-                transport.last_connection = datetime.now()
-                session.commit()
-                session.flush()
+    def next_transport_outline(self, session, only_dead=False):
+        if only_dead:
+            query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.score != 0, SSHTransportDefinition.last_connection > datetime.now() + timedelta(minutes=10))).order_by(SSHTransportDefinition.last_connection)
+        else:
+            query = session.query(SSHTransportDefinition).filter(SSHTransportDefinition.score == 0).order_by(SSHTransportDefinition.last_connection)
+        if query.count():
+            transport = query[0]
+            transport.last_connection = datetime.now()
+            session.commit()
+            session.flush()
 
-                return transport.get_outline()
-            else:
-                # If we're just fetching for tests there's no point complaining, this is an expected and ok/good outcome
-                if not only_dead:
-                    log.error("Run out of OK transports, woe")
-                return None
+            return transport.get_outline()
+        else:
+            # If we're just fetching for tests there's no point complaining, this is an expected and ok/good outcome
+            if not only_dead:
+                log.error("Run out of OK transports, woe")
+            return None
 
     def setup(self, transport_outline, host, port) -> Tuple[Optional[socket], int]:
         return _establish(transport_outline, host, port, self.get_outbound_proxy())
@@ -144,33 +144,33 @@ class SSHTransportCarousel(Thread):
             return self._outbound_socks_hostname, self._outbound_socks_port
 
     def test_all(self):
-        with get_context_session(self.session_factory) as session:
-            for transport_def in session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added):
-                # TODO: configurable test target
-                sock, stat = _establish(transport_def.get_outline(), "example.com", 80, self.get_outbound_proxy())
-                transport_def.score = stat
-                if sock:
-                    sock.close()
+        session = self.session
+        for transport_def in session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added):
+            # TODO: configurable test target
+            sock, stat = _establish(transport_def.get_outline(), "example.com", 80, self.get_outbound_proxy())
+            transport_def.score = stat
+            if sock:
+                sock.close()
 
     def dump(self, filehandle):
-        with get_context_session(self.session_factory) as session:
-            for definition in session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added):
-                print(definition.dump(), file=filehandle)
+        session = self.session
+        for definition in session.query(SSHTransportDefinition).order_by(SSHTransportDefinition.time_added):
+            print(definition.dump(), file=filehandle)
 
-    def update_transport_score(self, outline: SSHTransportOutline, new_score: int):
-        with get_context_session(self.session_factory) as session:
-            update_values = {
-                SSHTransportDefinition.score: new_score,
-            }
-            session.execute(update(SSHTransportDefinition, values=update_values).where(
-                and_(
-                    SSHTransportDefinition.hostname == outline.hostname,
-                    SSHTransportDefinition.username == outline.username,
-                    SSHTransportDefinition.port == outline.port,
-                )
-            ))
-            session.commit()
-            session.flush()
+    def update_transport_score(self, outline: SSHTransportOutline, new_score: int, session):
+        session = session
+        update_values = {
+            SSHTransportDefinition.score: new_score,
+        }
+        session.execute(update(SSHTransportDefinition, values=update_values).where(
+            and_(
+                SSHTransportDefinition.hostname == outline.hostname,
+                SSHTransportDefinition.username == outline.username,
+                SSHTransportDefinition.port == outline.port,
+            )
+        ))
+        session.commit()
+        session.flush()
 
 
 def _establish(definition: SSHTransportOutline, host, port, proxy_pair) -> Tuple[Optional[socket], int]:
@@ -220,71 +220,71 @@ def get_host_port(full_host: str, default_port: int = 22):
     return args[0], args[1]
 
 
-def carousel_from_file(filehandle, session_factory) -> SSHTransportCarousel:
-    with get_context_session(session_factory) as session:
-        carousel = SSHTransportCarousel(session_factory)
+def carousel_from_file(filehandle, session_factory, session) -> SSHTransportCarousel:
 
-        for row_n, line in enumerate(filehandle):
-            remainder = line.rstrip("\n")
-            username, remainder = remainder.split("@", 1)
-            score = ""
-            if " " in username:
-                score, username = username.split(" ", 1)
-            full_host, remainder = remainder.split(" ", 1)
-            remainder = remainder.lstrip()
+    carousel = SSHTransportCarousel(session_factory, session)
 
-            auth_type, auth = remainder.split(" ", 1)
-            username = username.strip()
-            score = score.strip()
-            auth_type = auth_type.strip()
-            if score:
-                score = int(score)
-            else:
-                score = 0
-            hostname, port = get_host_port(full_host.strip())
+    for row_n, line in enumerate(filehandle):
+        remainder = line.rstrip("\n")
+        username, remainder = remainder.split("@", 1)
+        score = ""
+        if " " in username:
+            score, username = username.split(" ", 1)
+        full_host, remainder = remainder.split(" ", 1)
+        remainder = remainder.lstrip()
 
-            password = None
-            private_key = None
-            private_key_path = None
-            auth_type_str = None
+        auth_type, auth = remainder.split(" ", 1)
+        username = username.strip()
+        score = score.strip()
+        auth_type = auth_type.strip()
+        if score:
+            score = int(score)
+        else:
+            score = 0
+        hostname, port = get_host_port(full_host.strip())
 
-            if auth_type.lower() in ["pass", "password", "p", "pas"]:
-                password = auth
-                auth_type_str = "pass"
-            elif auth_type.lower() in ["rsa", "ecdsa", "ed25519"]:
-                private_key_path = auth
-                auth_type_str = auth_type
-                with open(private_key_path, "r") as f:
-                    query = session.query(KeyFileDefinition).filter(KeyFileDefinition.key_path == private_key_path)
-                    if not query.count():
-                        session.add(KeyFileDefinition(key_path=private_key_path, key_contents=f.read()))
-                    else:
-                        update_values = {
-                            KeyFileDefinition.key_contents: f.read()
-                        }
-                        session.execute(update(KeyFileDefinition, values=update_values).where(
-                            KeyFileDefinition.key_path == private_key_path))
-            else:
-                log.error(f"Can't process line {row_n+1}, don't recognise auth type {auth_type}")
+        password = None
+        private_key = None
+        private_key_path = None
+        auth_type_str = None
 
-            query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.hostname == hostname,
-                                                                 SSHTransportDefinition.username == username,
-                                                                 SSHTransportDefinition.port == port))
-            if not query.count():
-                session.add(SSHTransportDefinition(hostname=hostname, port=port, username=username, password=password,
-                                       score=score, key_path=private_key_path,
-                                       auth_type_str=auth_type_str, time_added=datetime.utcnow()))
-            else:
-                update_values = {
-                    SSHTransportDefinition.password: password,
-                    SSHTransportDefinition.key_path: private_key_path,
-                    SSHTransportDefinition.auth_type_str: auth_type_str
-                }
-                session.execute(update(SSHTransportDefinition, values=update_values).where(
-                    and_(SSHTransportDefinition.hostname == hostname,
-                         SSHTransportDefinition.username == username,
-                         SSHTransportDefinition.port == port)
-                ))
-            session.commit()
-            session.flush()
-        return carousel
+        if auth_type.lower() in ["pass", "password", "p", "pas"]:
+            password = auth
+            auth_type_str = "pass"
+        elif auth_type.lower() in ["rsa", "ecdsa", "ed25519"]:
+            private_key_path = auth
+            auth_type_str = auth_type
+            with open(private_key_path, "r") as f:
+                query = session.query(KeyFileDefinition).filter(KeyFileDefinition.key_path == private_key_path)
+                if not query.count():
+                    session.add(KeyFileDefinition(key_path=private_key_path, key_contents=f.read()))
+                else:
+                    update_values = {
+                        KeyFileDefinition.key_contents: f.read()
+                    }
+                    session.execute(update(KeyFileDefinition, values=update_values).where(
+                        KeyFileDefinition.key_path == private_key_path))
+        else:
+            log.error(f"Can't process line {row_n+1}, don't recognise auth type {auth_type}")
+
+        query = session.query(SSHTransportDefinition).filter(and_(SSHTransportDefinition.hostname == hostname,
+                                                             SSHTransportDefinition.username == username,
+                                                             SSHTransportDefinition.port == port))
+        if not query.count():
+            session.add(SSHTransportDefinition(hostname=hostname, port=port, username=username, password=password,
+                                   score=score, key_path=private_key_path,
+                                   auth_type_str=auth_type_str, time_added=datetime.utcnow()))
+        else:
+            update_values = {
+                SSHTransportDefinition.password: password,
+                SSHTransportDefinition.key_path: private_key_path,
+                SSHTransportDefinition.auth_type_str: auth_type_str
+            }
+            session.execute(update(SSHTransportDefinition, values=update_values).where(
+                and_(SSHTransportDefinition.hostname == hostname,
+                     SSHTransportDefinition.username == username,
+                     SSHTransportDefinition.port == port)
+            ))
+        session.commit()
+        session.flush()
+    return carousel
