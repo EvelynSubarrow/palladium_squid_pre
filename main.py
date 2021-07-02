@@ -64,9 +64,9 @@ class Connection:
     def disconnect(self, reason = None):
         try:
             dprint(self, "--", 0, "Disconnected" + " (%s)" % reason if reason else "")
+            self.closed = True
             self.socket.shutdown(socket.SHUT_RDWR)
             self.socket.close()
-            self.closed = True
         except OSError:
             dprint(self, "--", 0, "Connection already dead when tried to kill")
 
