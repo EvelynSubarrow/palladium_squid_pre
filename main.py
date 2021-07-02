@@ -62,11 +62,13 @@ class Connection:
         self.write_buffer += data
 
     def disconnect(self, reason = None):
-        dprint(self, "--", 0, "Disconnected" + " (%s)" % reason if reason else "")
-        self.socket.shutdown(socket.SHUT_RDWR)
-        self.socket.close()
-        self.closed = True
-
+        try:
+            dprint(self, "--", 0, "Disconnected" + " (%s)" % reason if reason else "")
+            self.socket.shutdown(socket.SHUT_RDWR)
+            self.socket.close()
+            self.closed = True
+        except OSError:
+            dprint(self, "--", 0, "Connection already dead when tried to kill")
 
 def process(c: Connection, carousel):
     if c.phase == 0:
